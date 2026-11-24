@@ -35,6 +35,20 @@ jobs:
             diagnostics/led-abi-validation.json
             diagnostics/ABI_RESULT.txt
             diagnostics/kmod-diff.txt
+      - name: Preserve unvalidated candidate if validation fails (DO NOT FLASH)
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: WR1300E_V4_FIX4_CANDIDATE_DO_NOT_FLASH
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            openwrt/bin/targets/ramips/mt7621/*cudy_wr1300e-v2*squashfs-sysupgrade.bin
+            openwrt/bin/targets/ramips/mt7621/*cudy_wr1300e-v2*.manifest
+            openwrt/bin/targets/ramips/mt7621/profiles.json
+            openwrt/bin/targets/ramips/mt7621/sha256sums
+            diagnostics/ABI_RESULT.txt
+            diagnostics/final-validation.txt
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v6
