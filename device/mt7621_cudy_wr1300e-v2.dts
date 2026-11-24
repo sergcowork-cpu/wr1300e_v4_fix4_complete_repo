@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+// Cudy WR1300E v2.0 (R60): source candidate, hardware not tested.
+// Mappings cross-checked against original Cudy 2.4.22 and third-party OpenWrt 25.12.5 DTBs.
+#include "mt7621_cudy_wr1300-v2v3.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+    compatible = "cudy,wr1300e-v2", "mediatek,mt7621-soc";
+    model = "Cudy WR1300E v2";
+
+    aliases {
+        led-boot = &led_sys;
+        led-failsafe = &led_red;
+        led-running = &led_sys;
+        led-upgrade = &led_red;
+    };
+};
+
+// Two LAN ports (physical switch port 2 = lan2, port 3 = lan1), one WAN via gmac1.
+&switch0 {
+    ports {
+        port@0 { status = "disabled"; };
+        port@1 { status = "disabled"; };
+        port@2 { status = "okay"; label = "lan2"; };
+        port@3 { status = "okay"; label = "lan1"; };
+        port@4 { status = "disabled"; };
+    };
+};
+
+// WR1300E v2 PCIe mapping differs from ordinary WR1300 v2.
+&pcie0 {
+    wifi@0,0 {
+        compatible = "mediatek,mt76";
+        reg = <0x0000 0 0 0 0>;
+        nvmem-cells = <&eeprom_factory_0>, <&macaddr_bdinfo_de00 0>;
+        nvmem-cell-names = "eeprom", "mac-address";
+        ieee80211-freq-limit = <2400000 2500000>;
+    };
+};
+
+&pcie1 {
+    wifi@0,0 {
+        compatible = "mediatek,mt76";
+        reg = <0x0000 0 0 0 0>;
+        nvmem-cells = <&eeprom_factory_8000>, <&macaddr_bdinfo_de00 2>;
+        nvmem-cell-names = "eeprom", "mac-address";
+        ieee80211-freq-limit = <5000000 6000000>;
+    };
+};
+
+&{/leds} {
+    /delete-node/ wps;
+    led_red: red {
+        label = "red:status";
+        color = <LED_COLOR_ID_RED>;
+        function = LED_FUNCTION_STATUS;
+        gpios = <&gpio 3 GPIO_ACTIVE_LOW>;
+    };
+    internet {
+        label = "green:wan-online";
+        color = <LED_COLOR_ID_GREEN>;
+        function = "wan-online";
+        gpios = <&gpio 13 GPIO_ACTIVE_LOW>;
+    };
+    wan {
+        label = "green:wan";
+        color = <LED_COLOR_ID_GREEN>;
+        function = LED_FUNCTION_WAN;
+        gpios = <&gpio 14 GPIO_ACTIVE_LOW>;
+    };
+    lan {
+        label = "green:lan";
+        color = <LED_COLOR_ID_GREEN>;
+        function = LED_FUNCTION_LAN;
+        gpios = <&gpio 42 GPIO_ACTIVE_LOW>;
+    };
+    wifi2 {
+        label = "green:wlan-2ghz";
+        color = <LED_COLOR_ID_GREEN>;
+        function = "wlan-2ghz";
+        gpios = <&gpio 47 GPIO_ACTIVE_LOW>;
+    };
+    wifi5 {
+        label = "green:wlan-5ghz";
+        color = <LED_COLOR_ID_GREEN>;
+        function = "wlan-5ghz";
+        gpios = <&gpio 45 GPIO_ACTIVE_LOW>;
+    };
+};
+
+&state_default {
+    gpio {
+        groups = "uart3", "wdt", "i2c", "jtag";
+        function = "gpio";
+    };
+};
