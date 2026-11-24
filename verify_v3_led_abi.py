@@ -9,6 +9,7 @@ import re
 import json
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import time
 import urllib.request
@@ -81,7 +82,50 @@ def fetch_official() -> dict:
     raise RuntimeError(f'Could not fetch official ABI manifest; STOP (fail closed): {err}')
 
 
+def device_manifest(root: Path, manifest_path: Path, data: bytes) -> tuple[Path, Path]:
+    # OpenWrt 25.12.6 emits a target-wide manifest before installing
+    # per-device packages. Never use it to verify this device's packages.
+    # Match the exact SquashFS bytes appended to the finished sysupgrade BIN.
+    matches = []
+    for squashfs in root.glob('build_dir/target-*/linux-ramips_mt7621/root.squashfs+pkg=*'):
+        blob = squashfs.read_bytes()
+        if blob.startswith(b'hsqs') and data.find(blob, 64 + u32(data, 12)) >= 0:
+            suffix = squashfs.name.split('=', 1)[1]
+            matches.append((squashfs, squashfs.parent / ('target-dir-' + suffix)))
+    if len(matches) != 1:
+        raise RuntimeError(f'Expected one device SquashFS matching BIN, found {len(matches)}')
+    squashfs, device_root = matches[0]
+    if not device_root.is_dir():
+        raise RuntimeError(f'Missing matching device root: {device_root}')
+    print(f'BIN SquashFS matches {squashfs.name}; reading package DB from {device_root.name}', flush=True)
+    # Use the same host APK manifest command as OpenWrt's build, but on the
+    # device-specific root directory rather than root.orig-ramips.
+    host = root / 'staging_dir/host/bin'
+    cmd = [str(host / 'fakeroot'), str(host / 'apk'), '--root', str(device_root),
+           '--keys-dir', str(root), '--no-logfile', '--preserve-env', 'list',
+           '--quiet', '--manifest', '--no-network', '--repositories-file', '/dev/null']
+    try:
+        proc = subprocess.run(cmd, check=True, capture_output=True, text=True,
+                              cwd=root)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f'Device APK manifest failed: {exc.stderr}') from exc
+    if proc.stderr:
+        print(proc.stderr, file=sys.stderr, end='')
+    rows = []
+    for line in proc.stdout.splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2:
+            raise RuntimeError(f'Unexpected APK manifest line: {line!r}')
+        rows.append(f'{fields[0]} - {fields[1]}')
+    if not rows:
+        raise RuntimeError('Device APK manifest empty')
+    manifest = manifest_path.parent / f'openwrt-25.12.6-ramips-mt7621-{PROFILE}.manifest'
+    manifest.write_text('\n'.join(sorted(rows)) + '\n')
+    return manifest, device_root
+
+
 def check(root: Path) -> dict:
+    root = root.resolve()
     manifest_path = root / 'bin/targets/ramips/mt7621/profiles.json'
     if not manifest_path.is_file():
         raise RuntimeError(f'Build manifest not found: {manifest_path}')
@@ -117,17 +161,16 @@ def check(root: Path) -> dict:
     sha256 = hashlib.sha256(data).hexdigest()
     if images[0].get('sha256') != sha256:
         raise RuntimeError('Firmware SHA256 differs from profiles.json')
-    # Ensure the LED default triggers were copied to the firmware build tree.
-    defaults = root / 'target/linux/ramips/mt7621/base-files/etc/board.d/01_leds'
+    # Verify package selections in the actual per-device root filesystem.
+    manifest, device_root = device_manifest(root, manifest_path, data)
+    defaults = device_root / 'etc/board.d/01_leds'
     if not defaults.is_file() or 'cudy,wr1300e-v2)' not in defaults.read_text():
-        raise RuntimeError('WR1300E V2 LED defaults absent from 01_leds')
-    manifests = list(manifest_path.parent.glob('*cudy_wr1300e-v2*.manifest'))
-    if len(manifests) != 1:
-        raise RuntimeError(f'Expected one WR1300E v2 package manifest, found {len(manifests)}')
-    pkg_names={line.split()[0] for line in manifests[0].read_text().splitlines() if line.strip()}
+        raise RuntimeError('WR1300E V2 LED defaults absent from device root 01_leds')
+    pkg_names = {line.split()[0] for line in manifest.read_text().splitlines() if line.strip()}
     for package in ('kmod-ledtrig-network','luci','dropbear','kmod-mt7603','kmod-mt7615e'):
         if package not in pkg_names:
-            raise RuntimeError(f'{package} absent from manifest')
+            raise RuntimeError(f'{package} absent from device manifest')
+    print('Device package manifest and LED defaults verified', flush=True)
     # Check the actual DTB inside the published image, not a possibly stale build file.
     kernel = lzma.decompress(data[64:64 + u32(data, 12)])
     candidates = []
@@ -192,6 +235,8 @@ def check(root: Path) -> dict:
         'supported_devices': profile['supported_devices'],
         'model': model.decode(),
         'compiled_leds': observed,
+        'device_manifest': manifest.name,
+        'device_rootfs': device_root.name,
         'sysupgrade_sha256': sha256,
         'image_filename': bin_path.name,
         'status': 'STATIC BUILD VALIDATION PASSED; HARDWARE NOT YET TESTED',

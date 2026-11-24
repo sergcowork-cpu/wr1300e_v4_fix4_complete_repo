@@ -73,5 +73,6 @@ imgs=(bin/targets/ramips/mt7621/*cudy_wr1300e-v2*squashfs-sysupgrade.bin)
 [[ ${#imgs[@]} -eq 1 ]]
 python3 "$HERE/verify_image.py" "${imgs[0]}" | tee "$D/image-validation.txt"
 cd "$HERE"
-python3 "$HERE/verify_v3_led_abi.py" "$SRC" | tee "$D/final-validation.txt"
+cp "$SRC/bin/targets/ramips/mt7621/profiles.json" "$D/profiles.json"
+python3 -u "$HERE/verify_v3_led_abi.py" "$SRC" 2>&1 | tee "$D/final-validation.txt"
 echo 'STATIC_VALIDATION_OK — hardware not yet tested'
